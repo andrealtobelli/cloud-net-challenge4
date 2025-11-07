@@ -1,0 +1,113 @@
+# ==========================================
+# Pipeline CI + CD - Projeto TrackZone (.NET)
+# ==========================================
+# Este pipeline:
+#  1️⃣ Executa build e testes (CI)
+#  2️⃣ Publica artefatos (.zip)
+#  3️⃣ Faz deploy automático no Azure App Service (CD)
+# ==========================================
+
+trigger:
+  branches:
+    include:
+      - main     
+
+pool:
+  vmImage: 'ubuntu-latest'
+
+variables:
+  buildConfiguration: 'Release'
+  artifactName: 'drop'
+  webAppName: 'trackzone-net-app'         
+  resourceGroupName: 'rg-trackzone-net'   
+  runtimeStack: 'DOTNETCORE|9.0'          
+  packagePath: '$(Build.ArtifactStagingDirectory)/publish_output'
+
+stages:
+# ================================
+# 🧱 STAGE 1: Build, Test & Publish
+# ================================
+- stage: Build
+  displayName: 'Build, Test e Publicação do TrackZone'
+  jobs:
+    - job: BuildJob
+      displayName: 'Compilar, testar e publicar o projeto .NET'
+      steps:
+        - checkout: self
+
+        - task: UseDotNet@2
+          displayName: 'Instalar SDK .NET 9.0'
+          inputs:
+            packageType: 'sdk'
+            version: '9.0.x'
+
+        - script: |
+            echo "🔧 Restaurando dependências..."
+            dotnet restore
+
+            echo "🏗️ Compilando projeto..."
+            dotnet build --configuration $(buildConfiguration)
+
+            echo "🧪 Executando testes..."
+            dotnet test --configuration $(buildConfiguration) --no-build --logger "trx;LogFileName=test_results.trx"
+
+            echo "📦 Publicando artefatos..."
+            dotnet publish --configuration $(buildConfiguration) -o $(packagePath)
+          displayName: 'Build, Test e Publish'
+
+        - task: PublishTestResults@2
+          displayName: 'Publicar resultados dos testes'
+          inputs:
+            testResultsFormat: 'VSTest'
+            testResultsFiles: '**/test_results.trx'
+            mergeTestResults: true
+
+        - task: ArchiveFiles@2
+          displayName: 'Compactar artefatos em .zip'
+          inputs:
+            rootFolderOrFile: '$(packagePath)'
+            includeRootFolder: false
+            archiveType: 'zip'
+            archiveFile: '$(Build.ArtifactStagingDirectory)/$(artifactName).zip'
+            replaceExistingArchive: true
+
+        - task: PublishBuildArtifacts@1
+          displayName: 'Publicar artefato para o pipeline'
+          inputs:
+            pathToPublish: '$(Build.ArtifactStagingDirectory)'
+            artifactName: '$(artifactName)'
+
+# ================================
+# 🚀 STAGE 2: Deploy no Azure
+# ================================
+- stage: Deploy
+  displayName: 'Deploy automático no Azure App Service'
+  dependsOn: Build
+  condition: succeeded()
+
+  jobs:
+    - deployment: DeployJob
+      displayName: 'Publicar TrackZone no App Service'
+      environment: 'production'
+      strategy:
+        runOnce:
+          deploy:
+            steps:
+              - task: DownloadBuildArtifacts@0
+                displayName: 'Baixar artefatos do build'
+                inputs:
+                  buildType: 'current'
+                  downloadType: 'single'
+                  artifactName: '$(artifactName)'
+                  downloadPath: '$(System.ArtifactsDirectory)'
+
+              - task: AzureWebApp@1
+                displayName: 'Deploy no App Service (trackzone-net-app)'
+                inputs:
+                  azureSubscription: 'trackzone-azure-conn'
+                  appName: '$(webAppName)'
+                  package: '$(System.ArtifactsDirectory)/$(artifactName)/$(artifactName).zip'
+
+              - script: |
+                  echo "✅ Deploy concluído com sucesso no App Service: $(webAppName)"
+                displayName: 'Confirmação do deploy'
