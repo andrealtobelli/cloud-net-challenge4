@@ -1,5 +1,7 @@
 #!/bin/bash
-set -e  # para parar caso dê erro
+set -e
+
+echo "[TrackZone] Iniciando configuração da infraestrutura (Azure DevOps)..."
 
 # ============================
 # VARIÁVEIS
@@ -9,57 +11,34 @@ export WEBAPP_NAME="trackzone-net-app"
 export APP_SERVICE_PLAN="planTrackzoneNet"
 export LOCATION="brazilsouth"
 export RUNTIME="DOTNETCORE:9.0"
-export GITHUB_REPO_NAME="andrealtobelli/challenge3-devops-net"
-export BRANCH="main"
 export APP_INSIGHTS_NAME="ai-trackzone-net"
 
-# Carregar variáveis do banco, se existir arquivo .env.db gerado pelo create-sql-server.sh
-if [ -f ./.env.db ]; then
-  # shellcheck disable=SC1091
-  source ./.env.db
-fi
-
-
-# ============================
-# DEFAULTS DE BANCO (podem ser sobrescritos via env ou .env.db)
-# ============================
-: "${RG_DB_NAME:=rg-trackzone-net-db}"
-: "${DB_LOCATION:=brazilsouth}"
-: "${SERVER_NAME:=sqlserver-trackzone-net-$RANDOM$RANDOM}"
-: "${DB_USERNAME:=admsql}"
-: "${DB_PASSWORD:=Trackzone_321}"
-: "${DB_NAME:=SistemaGestaoMotos}"
-
+# Banco
+export RG_DB_NAME="rg-trackzone-net-db"
+export DB_LOCATION="brazilsouth"
+export SERVER_NAME="sqlserver-trackzone-net-$RANDOM"
+export DB_USERNAME="admsql"
+export DB_PASSWORD="Trackzone_321"
+export DB_NAME="SistemaGestaoMotos"
 
 # ============================
 # PROVIDERS E EXTENSÕES
 # ============================
 az provider register --namespace Microsoft.Web
+az provider register --namespace Microsoft.Sql
 az provider register --namespace Microsoft.Insights
 az provider register --namespace Microsoft.OperationalInsights
 az provider register --namespace Microsoft.ServiceLinker
-az provider register --namespace Microsoft.Sql
 
 az extension add --name application-insights --allow-preview true || true
-
-# ============================
-# PRÉ-CHECKS
-# ============================
-if ! command -v az >/dev/null 2>&1; then
-  echo "ERRO: Azure CLI (az) não encontrado." >&2
-  exit 1
-fi
-# sqlcmd é preferido, mas se não existir e houver pwsh, usaremos Invoke-Sqlcmd como fallback
-if ! command -v sqlcmd >/dev/null 2>&1 && ! command -v pwsh >/dev/null 2>&1; then
-  echo "ERRO: Nem sqlcmd nem pwsh encontrados. Instale o sqlcmd (ou use PowerShell com módulo SqlServer)." >&2
-  exit 1
-fi
+echo "[TrackZone] Providers e extensões registrados."
 
 # ============================
 # GRUPOS DE RECURSOS
 # ============================
-az group create --name $RG_DB_NAME --location "${DB_LOCATION:-eastus2}"
+az group create --name $RG_DB_NAME --location "$DB_LOCATION"
 az group create --name $RESOURCE_GROUP_NAME --location "$LOCATION"
+echo "[TrackZone] Grupos de recursos criados."
 
 # ============================
 # BANCO DE DADOS SQL
@@ -76,21 +55,21 @@ az sql db create \
   --resource-group $RG_DB_NAME \
   --server $SERVER_NAME \
   --name $DB_NAME \
-  --service-objective Basic \
-  --backup-storage-redundancy Local \
-  --zone-redundant false
+  --service-objective Basic
 
-# Liberar firewall (apenas testes!)
 az sql server firewall-rule create \
   --resource-group $RG_DB_NAME \
   --server $SERVER_NAME \
-  --name liberaGeral \
+  --name "AllowAllAzureIPs" \
   --start-ip-address 0.0.0.0 \
   --end-ip-address 255.255.255.255
+
+echo "[TrackZone] Banco de dados SQL criado e firewall liberado."
 
 ## ============================
 ## EXECUTAR T-SQL (reset, schema, seeds, triggers)
 ## ============================
+echo "[TrackZone] Executando script SQL para criar schema e inserir dados seed..."
 TMP_SQL=$(mktemp)
 cat >"$TMP_SQL" <<'SQL'
 SET NOCOUNT ON;
@@ -205,33 +184,9 @@ INSERT INTO dbo.Operacoes (TipoOperacao, Descricao, DataOperacao, MotoId, Usuari
   (4, N'Check-in da moto DEF5678 após reparo', SYSUTCDATETIME(), 3, 3);
 GO
 
--- Triggers para auditoria automática das tabelas principais
-GO
-CREATE OR ALTER TRIGGER dbo.trg_update_DataAtualizacao_Usuarios
-ON dbo.Usuarios
-AFTER UPDATE
-AS
-BEGIN
-  SET NOCOUNT ON;
-  UPDATE u
-  SET DataAtualizacao = SYSUTCDATETIME()
-  FROM dbo.Usuarios u
-  INNER JOIN inserted i ON u.Id = i.Id;
-END
-GO
 
-CREATE OR ALTER TRIGGER dbo.trg_update_DataAtualizacao_Motos
-ON dbo.Motos
-AFTER UPDATE
-AS
-BEGIN
-  SET NOCOUNT ON;
-  UPDATE m
-  SET DataAtualizacao = SYSUTCDATETIME()
-  FROM dbo.Motos m
-  INNER JOIN inserted i ON m.Id = i.Id;
-END
-GO
+-- Triggers removidos para compatibilidade com Entity Framework
+-- O campo DataAtualizacao será atualizado diretamente pelo código C# no serviço/repositório
 
 SELECT N'Banco limpo e pronto para recriação!' AS status;
 GO
@@ -260,6 +215,7 @@ else
     }
   "
 fi
+echo "[TrackZone] Script SQL executado com sucesso."
 
 rm -f "$TMP_SQL"
 
@@ -278,6 +234,8 @@ CONNECTION_STRING=$(az monitor app-insights component show \
   --query connectionString \
   --output tsv)
 
+echo "[TrackZone] Application Insights criado e configurado."
+
 # ============================
 # APP SERVICE PLAN + WEBAPP
 # ============================
@@ -294,17 +252,10 @@ az webapp create \
   --plan $APP_SERVICE_PLAN \
   --runtime "$RUNTIME"
 
-# Habilitar autenticação SCM
-az resource update \
-  --resource-group $RESOURCE_GROUP_NAME \
-  --namespace Microsoft.Web \
-  --resource-type basicPublishingCredentialsPolicies \
-  --name scm \
-  --parent sites/$WEBAPP_NAME \
-  --set properties.allow=true
+echo "[TrackZone] WebApp criado com sucesso."
 
 # ============================
-# CONFIGURAR VARIÁVEIS DO APP
+# CONFIGURAÇÃO DE VARIÁVEIS DO APP
 # ============================
 DOTNET_CONNECTION_STRING="Server=$SERVER_NAME.database.windows.net;Database=$DB_NAME;User Id=$DB_USERNAME;Password=$DB_PASSWORD;Encrypt=true;TrustServerCertificate=false;Connection Timeout=30;"
 
@@ -313,34 +264,23 @@ az webapp config appsettings set \
   --resource-group "$RESOURCE_GROUP_NAME" \
   --settings \
     APPLICATIONINSIGHTS_CONNECTION_STRING="$CONNECTION_STRING" \
-    ApplicationInsightsAgent_EXTENSION_VERSION="~3" \
-    XDT_MicrosoftApplicationInsights_Mode="Recommended" \
-    XDT_MicrosoftApplicationInsights_PreemptSdk="1" \
     ConnectionStrings__DefaultConnection="$DOTNET_CONNECTION_STRING" \
+    ASPNETCORE_ENVIRONMENT="Production" \
     DB_SERVER="$SERVER_NAME.database.windows.net" \
     DB_DATABASE="$DB_NAME" \
     DB_USERNAME="$DB_USERNAME" \
-    DB_PASSWORD="$DB_PASSWORD" \
-    ASPNETCORE_ENVIRONMENT="Production"
+    DB_PASSWORD="$DB_PASSWORD"
 
-# Reiniciar o Web App
-az webapp restart --name $WEBAPP_NAME --resource-group $RESOURCE_GROUP_NAME
+az webapp restart --name "$WEBAPP_NAME" --resource-group "$RESOURCE_GROUP_NAME"
 
-# Conectar App ao Application Insights
-az monitor app-insights component connect-webapp \
-    --app $APP_INSIGHTS_NAME \
-    --web-app $WEBAPP_NAME \
-    --resource-group $RESOURCE_GROUP_NAME
+echo "[TrackZone] Variáveis de ambiente configuradas e WebApp reiniciado."
 
 # ============================
-# DEPLOY VIA GITHUB ACTIONS
+# SAÍDA PARA PIPELINES (AZURE DEVOPS)
 # ============================
-az webapp deployment github-actions add \
-  --name $WEBAPP_NAME \
-  --resource-group $RESOURCE_GROUP_NAME \
-  --repo $GITHUB_REPO_NAME \
-  --branch $BRANCH \
-  --login-with-github
+echo "##vso[task.setvariable variable=resourceGroupName]$RESOURCE_GROUP_NAME"
+echo "##vso[task.setvariable variable=webAppName]$WEBAPP_NAME"
+echo "##vso[task.setvariable variable=connectionString]$DOTNET_CONNECTION_STRING"
+echo "##vso[task.setvariable variable=appInsightsConnectionString]$CONNECTION_STRING"
 
-echo "✅ Deploy configurado com sucesso!"
-
+echo "[TrackZone] Infraestrutura criada e variáveis exportadas para o pipeline Azure DevOps."

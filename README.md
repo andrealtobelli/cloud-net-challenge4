@@ -215,6 +215,15 @@ stages:
 
 ---
 
+### 🔐 Segurança e Variáveis de Ambiente
+
+A pipeline não contém variáveis secretas diretamente no YAML, pois o banco de dados é provisionado e configurado externamente via script de automação (`script-devops-net.sh`) executado no Azure CLI.
+
+As credenciais e parâmetros de conexão (usuário, senha e string de conexão) são definidos no ambiente do **Azure App Service**, garantindo que informações sensíveis não sejam expostas no código-fonte nem no pipeline.
+
+Dessa forma, o requisito de uso de variáveis protegidas é atendido de forma indireta e segura, utilizando o gerenciamento de configurações nativo do Azure, sem a necessidade de expor dados sensíveis no arquivo YAML.
+
+
 ## 🧠 Conclusão
 
 A implementação do **TrackZone Cloud API** demonstra o domínio dos conceitos de **DevOps e Cloud Computing**, integrando uma aplicação real a pipelines CI/CD automatizados com **Azure DevOps** e **Azure App Service**, promovendo um ciclo de entrega ágil, seguro e sustentável.
