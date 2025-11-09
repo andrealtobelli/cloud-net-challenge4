@@ -46,7 +46,7 @@ A aplicação combina **boas práticas de desenvolvimento backend** com **princ�
 
 ## 2️⃣ Arquitetura da Solução
 
-![Arquitetura Macro](Arquitetura_macro2.png)
+![Arquitetura Macro](Arquitetura_macro2.jpg)
 
 ---
 
