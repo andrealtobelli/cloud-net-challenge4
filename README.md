@@ -44,9 +44,26 @@ A aplicação combina **boas práticas de desenvolvimento backend** com **princ�
 
 ---
 
-## 2️⃣ Arquitetura da Solução
+## 2️⃣ Arquitetura da Solução e Detalhamento dos componentes
 
 ![Arquitetura Macro](Arquitetura_macro2.jpg)
+
+
+## 🧩 Detalhamento dos Componentes
+
+| **Nome do Componente** | **Tipo** | **Descrição Funcional** | **Tecnologia/Ferramenta** |
+|--------------------------|----------|--------------------------|----------------------------|
+| **Repositório de Código** | SCM (Source Code Management) | Armazena e versiona o código-fonte da aplicação TrackZone Cloud API | GitHub/Repos |
+| **IDE de Desenvolvimento** | Ambiente de Desenvolvimento | Ambiente usado pelos desenvolvedores para codificação, build local e commit do código | Visual Studio Code |
+| **Pipeline CI/CD** | Orquestrador DevOps | Executa as etapas de build, testes automatizados, publicação de artefatos e deploy contínuo | Azure DevOps Pipelines |
+| **Testes Automatizados** | Validação de Qualidade | Executa testes unitários automatizados durante o pipeline de integração contínua | xUnit (.NET) |
+| **Service Connection** | Integração Segura | Faz a ponte entre o Azure DevOps e os recursos do Azure para deploy automatizado | Azure Service Connection |
+| **App Service** | Serviço de Aplicativo | Hospeda e executa a aplicação .NET em ambiente escalável na nuvem | Azure App Service |
+| **Plano de Serviço (App Service Plan)** | Infraestrutura | Define os recursos de computação (CPU, RAM e instâncias) usados pelo App Service | Azure App Service Plan |
+| **Banco de Dados** | Persistência de Dados | Armazena informações de usuários, motos, operações e status | Azure SQL Database |
+| **Resource Group** | Organização de Recursos | Agrupa e gerencia todos os recursos de nuvem do projeto (App Service, Banco de Dados, etc.) | Azure Resource Group |
+| **Ambiente de Produção** | Deploy em Nuvem | Recebe automaticamente a versão mais recente da aplicação via CD | Azure Cloud (App Service Production) |
+| **Desenvolvedor** | Usuário Final Técnico | Responsável por criar, testar e versionar o código no repositório | VS Code + Git |
 
 ---
 
